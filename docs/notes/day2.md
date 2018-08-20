@@ -1,12 +1,12 @@
 # 运行 `webpack` 02
 
-我们安装的 CLI 工具是 `webpack-cli`。在上一节的 `webpack.js` 文件中，检测通过 `require()` 直接加载 `node_modules/webpack-cli/.bin/cli.js`，这个文件主要用来定义 CLI 功能、接受的参数等，大致结构是：
+我们选择安装的 CLI 工具是 `webpack-cli`。在上一节的 `webpack.js` 文件中，检测通过 `require()` 直接加载工具会根据  `package.json` 中的的 `bin` 字段，加载 `node_modules/webpack-cli/.bin/cli.js` 文件，这个文件是用来定义 CLI 功能、解析参数，最后生成配置项，执行打包程序。其大致结构是：
 
 ```javascript
 #!/usr/bin/env node
 
 (function() {
-  // 我们熟悉 IIFE，是为了能够使用 return
+  // 熟悉的 IIFE，为了能够使用 return
 
   // 使用本地版本的 webpack-cli 工具，本地没有安装的话，直接退出
   const importLocal = require('import-local');
@@ -67,23 +67,9 @@
       } catch (err) {
         // 打包失败，打印错误信息
       }
-      
-      // 打包结束后的回调函数
-      function compilerCallback(err, stats) {
-        // 打印信息、错误、生成统计文件
-      }
-      if (firstOptions.watch || options.watch) {
-        // 如果设置了监听模式
-        //...
-        // 注册监听事件，每次打包结束后执行回调
-        compiler.watch(watchOptions, compilerCallback);
-      } else {
-        // 否则直接执行打包结束的回调
-        compiler.run(compilerCallback);
-      }
     }
 
-    // 使用配置型
+    // 使用配置进行打包
     processOptions(options);
   })
 })();
@@ -98,4 +84,4 @@
 
 # 总结
 
-使用 `yargs` 解析命令行，以生成最终的打包配置项，然后加载 `webpack` 包，执行打包程序。
+当命令行工具加载完毕之后，通过执行 `yargs` 解析命令行，生成最终的 webpack 打包配置项，然后加载 `webpack` 包，执行打包程序，得到编译器对象以及编译结果。
