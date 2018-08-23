@@ -42,7 +42,7 @@
 
     // 无关紧要的配置
 
-    // 得到最终的 webpack 配置项
+    // 解析 CLI 传入的参数得到 webpack 配置项
     try {
       options = require("./convert-argv")(argv);
     } catch (err) {
@@ -80,7 +80,8 @@
 2. 对非打包的命令执行其他脚本（`webpack init`: 初始化 webpack 工程等）；
 3. 配置 `yargs`，包括打包默认配置项和命令行配置项；
 4. 执行 `yargs`，将命令行参数转化，生成最终的打包配置项（`options` 对象）；
-5. 通过 `processOptions` 加载 `webpack` 执行真正的打包程序；
+5. 通过 `processOptions` 加载 `webpack` 得到编译器
+6. 使用 `compiler.run` 执行打包程序；
 
 # 总结
 
