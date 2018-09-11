@@ -1,12 +1,12 @@
 # 运行 `webpack` 02
 
-我们选择安装的 CLI 工具是 `webpack-cli`。在上一节的 `webpack.js` 文件中，检测通过 `require()` 直接加载工具会根据  `package.json` 中的的 `bin` 字段，加载 `node_modules/webpack-cli/.bin/cli.js` 文件，这个文件是用来定义 CLI 功能、解析参数，最后生成配置项，执行打包程序。其大致结构是：
+我们选择安装的 CLI 工具是 `webpack-cli`。在上一节的 `webpack.js` 文件中，通过 `require()` 加载已经安装的命令行工具中 `package.json` 中的的 `bin` 字段指定的文件，即加载 `node_modules/webpack-cli/.bin/cli.js` 文件。这个文件是用来定义 CLI 功能、解析参数，最后生成 webpack 配置项，最后执行打包程序。其大致结构是：
 
 ```javascript
 #!/usr/bin/env node
 
 (function() {
-  // 熟悉的 IIFE，为了能够使用 return
+  // 熟悉的 IIFE，为了能够使用 return ，来截断后续执行
 
   // 使用本地版本的 webpack-cli 工具，本地没有安装的话，直接退出
   const importLocal = require('import-local');
@@ -18,23 +18,24 @@
   // 用于格式化错误信息
   const ErrorHelpers = require("./errorHelpers");
 
-  // 非 webpack 打包的命令，比如 init 初始化一个 webpack 工程等
+  // 非 webpack 打包的参数，比如 init 初始化一个 webpack 工程等
   // 如果有这种命令，就加载 `./prompt-command` 模块来执行，并直接退出，以后再详细说明
   const NON_COMPILATION_ARGS = [];
   const NON_COMPILATION_CMD = process.argv.find();
-  if (NON_COMPILATION_CMD) {}
+  if (NON_COMPILATION_CMD) {
+    return require("./prompt-command")(NON_COMPILATION_CMD, ...process.argv);
+  }
 
   // 使用 yargs 定义命令行
   const yargs = require("yargs").usage(
     //...
   );
 
-  // 配置命令行
-  // webpack 打包配置项，就是 webpack.config.js 中会出现的字段
+  // 配置命令行参数
+  // webpack 打包配置项
   require("./config-yargs")(yargs);
-  yargs.options({
-    // 命令行配置项
-  });
+  // 命令行配置项
+  yargs.options({});
 
   // 手动执行 yarg 解析命令行参数
   // yarg 会在查看帮助或版本的时候提前终止进程，导致较长的帮助文本会被截断
@@ -42,7 +43,7 @@
 
     // 无关紧要的配置
 
-    // 解析 CLI 传入的参数得到 webpack 配置项
+    // 解析 CLI 传入的参数，得到 webpack 配置项，
     try {
       options = require("./convert-argv")(argv);
     } catch (err) {
@@ -83,6 +84,14 @@
 5. 通过 `processOptions` 加载 `webpack` 得到编译器
 6. 使用 `compiler.run` 执行打包程序；
 
-# 总结
+## 总结
 
 当命令行工具加载完毕之后，通过执行 `yargs` 解析命令行，生成最终的 webpack 打包配置项，然后加载 `webpack` 包，执行打包程序，得到编译器对象以及编译结果。
+
+## 知识点
+
+### yargs
+
+- `yargs.usage()` 设置使用说明使用说明。
+- `yargs.options()` 设置可能存在的参数，可以传入对象来更详细的配置&验证选项。
+- `yargs.parse()` 手动解析命令行。
