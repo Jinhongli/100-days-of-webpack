@@ -31,6 +31,7 @@ const webpack = (options, callback) => {
     // 单个配置项
     // 添加默认配置
     options = new WebpackOptionsDefaulter().process(options);
+
     compiler = new Compiler(options.context);
     compiler.options = options;
     // 执行 plugin 的 apply 方法（讲对应功能挂载再编译器或者编译结果的钩子上）
@@ -43,7 +44,7 @@ const webpack = (options, callback) => {
     // 执行编译器环境钩子
     compiler.hooks.environment.call();
     compiler.hooks.afterEnvironment.call();
-    // 根据配置项预处理编译器，并得到最终的配置项
+    // 根据配置项执行插件，得到最终的编译器对象
     compiler.options = new WebpackOptionsApply().process(
       options,
       compiler
@@ -76,4 +77,6 @@ exports.version = version;
 
 # 总结
 
-其实这个 `webpack.js` 文件的作用就是验证、处理传入的配置项、挂载插件、预处理编译器之后，得到最终的编译器和配置项。
+其实这个 `webpack.js` 文件的作用就是验证、处理传入的配置项（设置默认值）、挂载插件并执行对应的钩子函数，得到最终的编译器和配置项。
+
+整个 webpack 编译器其实就是各种各样的插件拼接在一起（像流水线一样），然后对文件进行处理。
