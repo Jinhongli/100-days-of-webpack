@@ -50,23 +50,29 @@
       // 如果出错，使用 ErrorHelpers 格式化错误信息
     }
 
-    function ifArg(name, fn, init) {
-      // 辅助函数，策略执行
-    }
-
     function processOptions(options) {
-      // 先对配置进行预处理（添加默认配置），以后再具体说明
+      // 设置输出配置，统计信息之类的...
       // ...
 
       // 然后加载 webpack 模块，执行打包
       const webpack = require("webpack");
-      let lastHash = null;
       let compiler;
       try {
         // 打包成功，得到编译器对象
         compiler = webpack(options);
       } catch (err) {
         // 打包失败，打印错误信息
+      }
+
+      // 编译器执行回调
+      function compilerCallback(err, stats) {}
+
+      // 执行编译器
+      if (firstOptions.watch || options.watch) {
+        // 监视模式
+        compiler.watch(watchOptions, compilerCallback);
+      } else {
+        compiler.run(compilerCallback);
       }
     }
 
