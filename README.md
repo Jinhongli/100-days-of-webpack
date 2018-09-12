@@ -8,4 +8,5 @@ Learn webpack
 #### [Day 2 - 运行 `webpack` 02](./docs/notes/day2.md)
 #### [Day 3 - 运行 `webpack` 03](./docs/notes/day3.md)
 #### [Day 4 - Tapable 架构 01](./docs/notes/day4.md)
+#### [Day 5 - Tapable 架构 02](./docs/notes/day5.md)
 
