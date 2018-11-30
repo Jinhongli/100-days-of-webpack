@@ -1,20 +1,20 @@
 # Tapable 架构 02
 
-今天这一节继续讲解 `SyncHook`，来看一下钩子内部是怎么实现的。
+本节依然以最简单的 SyncHook 为例，稍微深入的讲一下 Hook 是如何生成的以及执行函数是如何编译的，至于插件挂载的细节暂且略过。
 
-还是从创建钩子的角度来看：
+废话少说，先看源码：
 
-```javascript
+```js
 // SyncHook.js
-const Hook = require('./Hook');
-const HookCodeFactory = require('./HookCodeFactory');
+const Hook = require("./Hook");
+const HookCodeFactory = require("./HookCodeFactory");
 
 class SyncHookCodeFactory extends HookCodeFactory {
   content({ onError, onResult, onDone, rethrowIfPossible }) {
     return this.callTapsSeries({
       onError: (i, err) => onError(err),
       onDone,
-      rethrowIfPossible,
+      rethrowIfPossible
     });
   }
 }
@@ -23,11 +23,11 @@ const factory = new SyncHookCodeFactory();
 
 class SyncHook extends Hook {
   tapAsync() {
-    throw new Error('tapAsync is not supported on a SyncHook');
+    throw new Error("tapAsync is not supported on a SyncHook");
   }
 
   tapPromise() {
-    throw new Error('tapPromise is not supported on a SyncHook');
+    throw new Error("tapPromise is not supported on a SyncHook");
   }
 
   compile(options) {
@@ -39,229 +39,251 @@ class SyncHook extends Hook {
 module.exports = SyncHook;
 ```
 
-先忽略 `SyncHookCodeFactory` 及其父类 `HookCodeFactory`。对于 `SyncHook` 来说，是 `Hook` 的派生类，并且重写了 `tapAsync()` 和 `tapPromise()`（禁止调用这两个 API ），从名字上可以看出是这是两个挂载异步钩子的函数，所以也忽略。而 `compile()` 方法也看不出来什么东西，没有看到 `tap()` 和 `call()`，所以需要再去看下它的基类 `Hook` 的源码。
+首先就是 SyncHook 继承自 Hook，并且重写了异步挂载方法 `tapAsync()` 和 `tapPromise()`，以及编译函数 `compile()`。
 
-```javascript
+值得注意是 `compile` 函数中出现了 `SyncHookCodeFactory` 的一个实例 `factory`，从命名可以猜出这个类用于生成执行函数，而且继承自基类 `HookCodeFactory`。但依然看不出来钩子是如何创建的，所以继续看 Hook 的源码。
+
+```js
 // Hook.js
 class Hook {
   constructor(args) {
-    // args 就是钩子回调函数的形参
     if (!Array.isArray(args)) args = [];
-    // 备份
+    // 插件回调函数所需的形参
     this._args = args;
-    // taps 就是所有挂载在钩子上的插件
+    // 所有挂载在钩子上的插件
     this.taps = [];
-    // interceptors 拦截器，可以用来对 call，tap 等方法做拦截
+    // 拦截器，可以用来对 call，tap 等方法做拦截，高级应用先忽略
     this.interceptors = [];
-    // 出现了 call，而 _createCompileDelegate 就是用来编译钩子的代理函数，并且内部通过懒加载的方式，即直到调用 call 时才真正的编译钩子，而编译其实就是 SyncHook 中重写的 compile 方法
-    // 也保存备份，_call（未编译）
-    this.call = this._call = this._createCompileDelegate('call', 'sync');
+    // 执行函数，通过懒执行的方式，实现真正运行 call 时才进行编译
+    // 同时也保存一个备份，_call（未编译状态），用于重置执行函数
+    this.call = this._call = this._createCompileDelegate("call", "sync");
     // 与 call 的功能一样，但是是异步的，先忽略
     this.promise = this._promise = this._createCompileDelegate(
-      'promise',
-      'promise'
+      "promise",
+      "promise"
     );
     this.callAsync = this._callAsync = this._createCompileDelegate(
-      'callAsync',
-      'async'
+      "callAsync",
+      "async"
     );
-    // 编程中最难的两件事之一：给变量起名 🙂
+    // 不知道为什么要取这么个诡秘的名字，之后就能知道它是干嘛滴
     this._x = undefined;
   }
 
   compile(options) {
-    // 派生类必须实现自己的编译函数
-    throw new Error('Abstract: should be overriden');
+    // 派生类必须重写编译函数
+    throw new Error("Abstract: should be overriden");
   }
 
   _createCall(type) {
+    // 真正执行编译的函数
     return this.compile({
       taps: this.taps,
       interceptors: this.interceptors,
       args: this._args,
-      type: type,
+      type: type
     });
   }
 
   _createCompileDelegate(name, type) {
     const lazyCompileHook = (...args) => {
-      // 重写 call 函数，从上面的 _createCall 可以看出，call 函数其实就是派生类编译 compile 的结果。在执行编译时，会传入这个钩子上挂载的插件（tags），拦截器（interceptors），形参（args）以及类型（type）。
+      // 运行编译函数得到执行函数（调用派生类 compile 方法的返回值）。
+      // 在执行编译时，会传入这个钩子上挂载的插件（tags），拦截器（interceptors），形参（args）以及类型（type）。
       this[name] = this._createCall(type);
-      // 调用编译后的 call 函数，并传递实参
+      // 调用执行函数，且透传执行 call 时的实参
       return this[name](...args);
     };
     return lazyCompileHook;
-  }
-
-  tap(options, fn) {
-    // options 是插件（名），fn 是回调函数
-    if (typeof options === 'string') options = { name: options };
-    if (typeof options !== 'object' || options === null)
-      throw new Error(
-        'Invalid arguments to tap(options: Object, fn: function)'
-      );
-    // 格式化 options，默认类型是同步的
-    options = Object.assign({ type: 'sync', fn: fn }, options);
-    if (typeof options.name !== 'string' || options.name === '')
-      throw new Error('Missing name for tap');
-    // 添加拦截器
-    options = this._runRegisterInterceptors(options);
-    // 挂载插件
-    this._insert(options);
-  }
-
-  tapAsync(options, fn) {
-    // 跟 tap 类似，不过是异步的，先忽略
-  }
-
-  tapPromise(options, fn) {
-    // 跟 tap 类似，不过是异步的，先忽略
-  }
-
-  _runRegisterInterceptors(options) {
-    for (const interceptor of this.interceptors) {
-      if (interceptor.register) {
-        const newOptions = interceptor.register(options);
-        if (newOptions !== undefined) options = newOptions;
-      }
-    }
-    return options;
-  }
-
-  withOptions(options) {
-    // 暂时用不到，忽略
-  }
-
-  isUsed() {
-    return this.taps.length > 0 || this.interceptors.length > 0;
-  }
-
-  intercept(interceptor) {
-    this._resetCompilation();
-    this.interceptors.push(Object.assign({}, interceptor));
-    if (interceptor.register) {
-      for (let i = 0; i < this.taps.length; i++)
-        this.taps[i] = interceptor.register(this.taps[i]);
-    }
-  }
-
-  _resetCompilation() {
-    // 重置 call 方法至未编译状态
-    this.call = this._call;
-    this.callAsync = this._callAsync;
-    this.promise = this._promise;
-  }
-
-  _insert(item) {
-    // item 就是插件（上面传入的变量叫 options，但是感觉就像是插件）
-    // 每次挂载新的插件时，都会重置钩子的编译状态
-    this._resetCompilation();
-    // 插件中 before 字段，用来插队。
-    let before;
-    if (typeof item.before === 'string') before = new Set([item.before]);
-    else if (Array.isArray(item.before)) {
-      before = new Set(item.before);
-    }
-    // 默认 stage（可以理解为优先级）
-    let stage = 0;
-    if (typeof item.stage === 'number') stage = item.stage;
-
-    // 准备工作已经结束，准备插入
-    // this.taps 数组就是钩子上挂载的所有插件；默认情况下新挂载的插件会在数组最右侧插入
-    // 像这样 [first, second, third...]
-    let i = this.taps.length;
-    while (i > 0) {
-      i--;
-      // 如果不设置 before 或 stage, 则仅仅复制最后一个插件到右侧，并改写它。
-      // 如果设置有 before 或 stage, 则从右到左，将每个插件右移一位，直至没有 before 或者 stage 不小于当前插件
-      const x = this.taps[i];
-      this.taps[i + 1] = x;
-      const xStage = x.stage || 0;
-      if (before) {
-        if (before.has(x.name)) {
-          before.delete(x.name);
-          continue;
-        }
-        if (before.size > 0) {
-          continue;
-        }
-      }
-      if (xStage > stage) {
-        continue;
-      }
-      i++;
-      break;
-    }
-    this.taps[i] = item;
   }
 }
 
 module.exports = Hook;
 ```
 
-唯一一个比较难的方法就是挂载插件时调用的 `_insert()` 方法，这里面实现了两种特性：`before` 和 `stage`。可以用来定义插件的顺序（虽然 Webpack 中没有用到这些，但是还是讲一下吧）。举一个简单的例子：
+可以看出在实例化钩子时声明了一些上一节露过脸的属性和方法。其中钩子的执行函数就是 `call`，`promise`，`callAsync` 三个。并且可以看出，执行函数并不是在实例化的时候编译的，而是先创建编译的代理，在真正调用执行函数时，先运行派生类的 `compile` 方法进行编译得到执行函数，然后再运行这个执行函数并返回结果。
 
-```javascript
+在之前的代码已经知道，`SyncHook.prototype.compile` 方法是通过执行函数工厂 `SyncHookCodeFactory` 的一个实例运行 `setup` 之后，运行 `create` 之后的返回值。从名字上可以猜出来：先配置，后创建。
+
+在继续看具体编译过程之前，先来看一下编译后的执行函数到底长什么样子，一个简陋的例子:
+
+```js
+
 const hook = new SyncHook();
 
-hook.tap('A', () => console.log('This is A.'));
-hook.tap('B', () => console.log('This is B.'));
-hook.tap('C', () => console.log('This is C.'));
+hook.tap("A", () => console.log("This is A."));
+hook.tap("B", () => console.log("This is B."));
+hook.tap("C", () => console.log("This is C."));
+hook.call();
+
+// console.log(hook.call.toString())
+function anonymous() {
+  "use strict";
+  var _context;
+  var _x = this._x;
+  var _fn0 = _x[0];
+  _fn0();
+  var _fn1 = _x[1];
+  _fn1();
+  var _fn2 = _x[2];
+  _fn2();
+}
 ```
 
-我们对一个钩子挂载了 3 个无聊的插件，也就是说会分别执行 `_insert()` 3 次，我们来看一下每次 while 循环时的 `taps` 属性的变化：
+上面的代码就是在编译执行之后，打印出来的执行函数。整个函数的意图比较简单，就是顺序执行所有插件的回调函数。但是出现了之前不知道是什么玩意的 `_x`，大概能猜出来它是用来存放所有插件的回调函数的属性。至于为什么执行所有插件回调函数要用这么诡异的方式，而不是直接遍历 `taps` 执行回调，在后面学习更多类型的钩子就知道了。
 
-- `_insert({name: A, ...})`: 并不会执行 while 循环，所以 `taps = [{name: A, ...}]`;
-- `_insert({name: B, ...})`:
-  - `i = 1`，`taps = [{name: A, ...}, {name: A, ...}]`;
-  - `break` 跳出循环，`taps = [{name: A, ...}, {name: B, ...}]`;
-- `_insert({name: C, ...})`:
-  - `i = 2`，`taps = [{name: A, ...}, {name: B, ...}, {name: B, ...}]`;
-  - `break` 跳出循环，`taps = [{name: A, ...}, {name: B, ...}, {name: C, ...}]`;
+现在终于可以看编译执行函数的具体过程了。因为代码实在太长，分别截取关键方法来看，首先是 `setup`。
 
-此时我们再添加一个插件：
+```js
+class Hook {
+  _createCall(type) {
+		return this.compile({
+			taps: this.taps,
+			interceptors: this.interceptors,
+			args: this._args,
+			type: type
+		});
+	}
+}
 
-```javascript
-hook.tap({ name: 'D', before: 'B' }, () => console.log('This is D.'));
+class SyncHook extends Hook
+	compile(options) {
+		factory.setup(this, options);
+		return factory.create(options);
+  }
+}
+
+class HookCodeFactory {
+  setup(instance, options) {
+		instance._x = options.taps.map(t => t.fn);
+	}
+}
 ```
 
-继续上面的步骤的话：
+`setup` 这个方法的作用非常简单，就是遍历所有的插件，将所有插件的回调函数放在钩子的实例属性 `_x` 上。另外值得注意的是，在调用 `compile` 时传递的实参就是钩子的配置，包含 `taps`，`interceptors`，`args`，`type` 四项。
 
-- `_insert({name: D, ...})`:
-  - `i = 3`，`taps = [{name: A, ...}, {name: B, ...}, {name: C, ...}, {name: C, ...}]`，存在 `before`，但 `before !== 'C'`，继续循环
-  - `i = 2`，`taps = [{name: A, ...}, {name: B, ...}, {name: B, ...}, {name: C, ...}]`，存在 `before`，且 `before === 'B'`，删除后继续循环
-  - `i = 1`，`taps = [{name: A, ...}, {name: A, ...}, {name: B, ...}, {name: C, ...}]`，存在 `before`，但大小为空
-  - `break` 跳出循环，`taps = [{name: A, ...}, {name: D, ...}, {name: B, ...}, {name: C, ...}]`;
+然后是核心的 `create` 方法，用来真正创建执行函数。
 
-这看起来很绕（为了减小时间复杂度），但其实 `taps` 属性就是一个带有优先级（`stage`）的队列，左侧是头部，右侧是尾部，并且可以使用可选的 `before` 来插队（用来直接指定在哪些插件的前面插入插件）。
+```js
+class SyncHookCodeFactory extends HookCodeFactory {
+	content({ onError, onResult, onDone, rethrowIfPossible }) {
+    // 重写 content 方法
+		return this.callTapsSeries({
+			onError: (i, err) => onError(err),
+			onDone,
+			rethrowIfPossible
+		});
+	}
+}
 
-插入的过程就是从右到左遍历所有已挂载的插件，查看该插件是否满足插队条件：
+class HookCodeFactory {
+  constructor(config) {
+		this.config = config;
+		this.options = undefined;
+		this._args = undefined;
+	}
 
-- 不满足就直接插在队尾；
-- 满足条件，就需要继续遍历，直至找到满足条件的插件，然后插在其前面（左面）；
+	create(options) {
+    // 执行函数工厂初始化，传递钩子配置和执行函数形参
+		this.init(options);
+    let fn;
+    // 这里先省略异步执行函数的分支
+		switch (this.options.type) {
+      case "sync":
+        // 由 Function 创建一个新的函数，其形参是钩子配置的 args 字段的复制
+        // 而函数体则是由 header() 和 content() 执行之后拼接在一起的内容
+        // 并分别设置函数体
+				fn = new Function(
+					this.args(),
+					'"use strict";\n' +
+						this.header() +
+						this.content({
+							onError: err => `throw ${err};\n`,
+							onResult: result => `return ${result};\n`,
+							onDone: () => "",
+							rethrowIfPossible: true
+						})
+				);
+				break;
+			case "async":
+				break;
+			case "promise":
+				break;
+    }
+    // 重置执行函数工厂
+    this.deinit();
+    // 返回执行函数
+		return fn;
+  }
+  
+	/**
+	 * @param {{ type: "sync" | "promise" | "async", taps: Array<Tap>, interceptors: Array<Interceptor> }} options
+	 */
+	init(options) {
+		this.options = options;
+		this._args = options.args.slice();
+	}
+
+	deinit() {
+		this.options = undefined;
+		this._args = undefined;
+  }
+  
+  header() {
+    // 得到 执行函数体 头部
+  }
+  
+  needContext() {
+    // 判断是否由钩子需要设定执行环境
+		for (const tap of this.options.taps) if (tap.context) return true;
+		return false;
+  }
+
+  callTap(tapIndex, { onError, onResult, onDone, rethrowIfPossible }) {
+    // 获取一个插件回调函数的执行模板
+	}
+  
+  callTapsSeries({ onError, onResult, onDone, rethrowIfPossible }) {
+    // 得到 顺序执行所有插件回调函数 的函数体
+		const next = i => {
+      // 得到当前执行函数的模板, i 表示插件的索引
+		};
+		// 从第一个插件开始
+		return next(0);
+  }
+  
+  args({ before, after } = {}) {
+    // 对执行函数的形参进行格式化，可以通过 before 和 after 在参数列表首尾添加额外参数
+    // 在 new Function 生成执行函数处，以及生成插件回调运行时传递
+	}
+}
+```
+
+这里先不考虑生成具体函数体的构成细节，只考虑大体上的编译流程：
+
+1. 执行 `compile()` 会先运行执行函数工厂的 `setup()`，目的是保存所有插件回调函数；
+2. 然后执行执行函数工厂的 `create()`，内部首先调用 `init()` 执行初始化，然后根据钩子的类型使用 `new Function()` 生成执行函数，最后重置工厂参数后返回执行函数；
+
+使用 `new Function` 生成执行函数的细节：
+
+1. 执行函数的参数由 `args()` 进行格式化；
+2. 执行函数的函数体由 `header()` 和 `content()` 拼接而成；
+3. `header()` 负责执行函数头部内容，包括初始化插件回调的执行环境、调用执行函数拦截器
+4. `content()` 负责将所有插件回调函数的执行凭借在一起。对于不同类型的钩子，通过重写 `content` 方法、传入不同的参数来生成不同的执行代码。
+
+`content()` 接受的参数包括：
+
+- `onError()`，处理插件回调执行报错的代码
+- `onResult()`，插件回调返回值相关的代码
+- `onDone()`，执行完毕时的代码
+- `rethrowIfPossible`：对每个插件回调添加容错的代码；（插件回调报错后是否继续执行剩余插件）
+
+执行 `content()` 的内部流程大致是：
+
+1. 根据钩子类型执行 `callTapsSeries`，`callTapsLooping` 或 `callTapsParallel`，以不同方式遍历插件回调；
+2. 不论哪种遍历方式，都使用 `callTap` 来插入一个插件回调的执行代码；
 
 # 总结
 
-放一下官网 README 中涉及的接口：
+本节粗略的介绍了钩子实例的初始化以及编译执行函数的过程。对于不同种类的钩子，以及不同类型的插件挂载方式，整体流程都是一样的，唯一不同的就是 `content` 函数生成的所有插件回调的执行代码。
 
-```javascript
-
-// 共有方法
-interface Hook {
-  tap: (name: string | Tap, fn: (context?, ...args) => Result) => void,
-}
-
-interface Tap {
-  name: string,
-  type: string
-  fn: Function,
-  stage: number,
-}
-
-// 私有方法 (只有包含钩子的类才可以调用):
-interface Hook {
-  call: (...args) => Result,
-}
-```
-
-本节主要介绍了同步钩子 `SyncHook` 实例的属性（`taps`, `args`），以及使用 `Hook.prototype.tap()` 到底如果挂载插件的，包括 `before` 和 `stage` 两个属性如何设置插件顺序。明天再讲如何来编译钩子并且如何执行其回调函数。
+至于对不同类型钩子编译执行函数的更多细节以后再细说。
