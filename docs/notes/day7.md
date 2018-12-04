@@ -1,8 +1,8 @@
 # Tapable 架构 04
 
-上一节讲过了 SyncHook 的执行方法 `call()`，这是一个同步的执行方法，此外还有另外两个执行函数：`callAsync()` 和 `promise` 。显然，这是异步的执行方法。
+对于 SyncHook，它重写了 `tapAsync` 和 `tapPromise` 两个方法来禁止挂载异步类型的插件，但通过之前的解读可以发现，在编译钩子的执行函数时，依然编译了异步执行方法 `callAsync` 和 `promise`。也就是说，我们可以在同步钩子上使用异步执行方法。
 
-🤨 这不是 SyncHook 同步钩子么，为什么会有异步执行方式？首先来看下编译出来的异步执行方法长什么样子（假设挂载 3 个插件）：
+在了解为什么这么做之前，先来看看两种异步执行函数的代码：
 
 ```javascript
 // callAsync.toString()
@@ -46,7 +46,7 @@ function anonymous(_callback) {
 // promise.toString()
 function anonymous() {
   "use strict";
-  return new Promise((_resolve,_reject)=>{
+  return new Promise((_resolve, _reject) => {
     var _sync = true;
     var _context;
     var _x = this._x;
@@ -57,12 +57,12 @@ function anonymous() {
     } catch (_err) {
       _hasError0 = true;
       if (_sync)
-        _resolve(Promise.resolve().then(()=>{
-          throw _err;
-        }
-        ));
-      else
-        _reject(_err);
+        _resolve(
+          Promise.resolve().then(() => {
+            throw _err;
+          })
+        );
+      else _reject(_err);
     }
     if (!_hasError0) {
       var _fn1 = _x[1];
@@ -72,12 +72,12 @@ function anonymous() {
       } catch (_err) {
         _hasError1 = true;
         if (_sync)
-          _resolve(Promise.resolve().then(()=>{
-            throw _err;
-          }
-          ));
-        else
-          _reject(_err);
+          _resolve(
+            Promise.resolve().then(() => {
+              throw _err;
+            })
+          );
+        else _reject(_err);
       }
       if (!_hasError1) {
         var _fn2 = _x[2];
@@ -87,12 +87,12 @@ function anonymous() {
         } catch (_err) {
           _hasError2 = true;
           if (_sync)
-            _resolve(Promise.resolve().then(()=>{
-              throw _err;
-            }
-            ));
-          else
-            _reject(_err);
+            _resolve(
+              Promise.resolve().then(() => {
+                throw _err;
+              })
+            );
+          else _reject(_err);
         }
         if (!_hasError2) {
           _resolve();
@@ -104,16 +104,22 @@ function anonymous() {
 }
 ```
 
-可以看出，两个执行函数在调用时，挂载的回调函数的执行依然是同步的，只不过会添加 `try/catch` 块用于回调函数出错后执行 `_callback` 或者修改 Promise 状态。
+其实两种异步执行方式的插件执行方式是一样的，不同的只是插件报错时的调用方式。`callAsync` 通过 NodeJS 中常见的将错误作为第一个参数的方式；而 `promise` 则是 resolve 并传递错误的 Promise。
 
-这么看来，`callAsync()` 和 `promise()` 仅仅是增加了所有插件回调函数执行完毕之后的回调函数。如果其中一个插件报错，那么就会将错误作为第一个参数调用回调。可以说，使用异步执行方式可以对所有插件的回调函数的执行添加一个回调函数。不同的是，`callAsync()` 的回调函数的执行也是同步的，而 `promise()` 的回调函数是异步的（等待线程为空之后才会调用）。
+这两种执行方式对于插件的顺序执行大抵过程为：
 
-而对于插件的回调函数来说，其调用顺序与 `call()` 来比，并没有什么不同。
+1. 执行插件回调，如果出错，就执行回调并传递错误；
+2. 如果没有出错，就返回 1 执行下一个插件回调；
+3. 知道所有的插件执行完毕，执行回调；
 
-而具体 3 个执行方法的拼接，是 `HookCodeFactory.prototype.create()` 以及 `HookCodeFactory.prototype.callTap()` 两个方法根据 `type` 类型拼接不同 JavaScript 语句得出的。
+相比于同步执行方法，只是多了执行的回调函数而已，即当全部插件回调都执行完毕或者某个插件回调函数报错时调用的函数。
 
-## 总结
+在实际开发中，通常应用于钩子的携带者，监听所有插件执行完毕的事件，比如说 webpack 在一个周期上挂载的所有插件执行完毕之后，继续执行编译。
 
-虽然 SyncHook 是同步钩子，禁止了 `tapAsync()` 和 `tapPromise()` 的异步挂载插件的方法，但是执行方法依然可以有异步的：`callAsync()` 和 `promise()`。
+另外，对于异步钩子的 `tapAsync` 和 `tapPromise` 方法，其内部实现与 `tap` 方法 90% 都是重复的。唯一不同之处在于插件配置中的 `type` 字段以及调用出错时的错误信息。而这个 `type` 字段用于在编译执行函数时进行 `switch`。
 
-相比 `call()` 只是多了所有插件执行完毕的回调函数（符合 Nodejs 回调函数规范，即如果有插件报错，也会执行该回调，会讲错误传递作为第一个参数传递给回调函数），而所有插件的执行依然是同步的，并且 `callAsync()` 的回调函数也是同步的，只有 `promise()` 才是异步的。
+# 总结
+
+本节对同步钩子剩余的一点内容：异步执行方式，进行了并不深入的解读，了解了同步钩子的异步执行函数的工作原理。另外还了解了下异步挂载方式与同步挂载方式没什么两样。
+
+通过这两节的内容，相信你也察觉出其中的一点问题：对于超过 50% 以上内容不同的编译函数来说，这里通过传参的方式实现，所谓的派生类执行函数工厂，“仅仅”在重写 `content` 时传递不同的参数。导致即便使用了派生类区分不同类型的钩子，但在编译执行函数的过程中 99% 的逻辑依然在基类中，阅读起来十分痛苦。
