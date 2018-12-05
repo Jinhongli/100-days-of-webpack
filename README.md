@@ -11,4 +11,5 @@ Learn webpack
 #### [Day 5 - Tapable 架构 02](./docs/notes/day5.md)
 #### [Day 6 - Tapable 架构 03](./docs/notes/day6.md)
 #### [Day 7 - Tapable 架构 04](./docs/notes/day7.md)
+#### [Day 8 - Tapable 架构 05](./docs/notes/day8.md)
 
